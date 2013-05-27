@@ -65,6 +65,8 @@ class PushServiceGCM
             else
                 @logger?.error("GCM Error: #{error}")
 
+    allMessagesPushed: ->
+        return (prop for prop of @multicastQueue).length is 0
 
 
 exports.PushServiceGCM = PushServiceGCM

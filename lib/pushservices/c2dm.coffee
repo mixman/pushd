@@ -13,17 +13,21 @@ class PushServiceC2DM
         @driver = new c2dm.C2DM(conf)
         @driver.login (err, token) =>
             if err then throw Error(err)
-            [queuedTasks, @queue] = [@queue, async.queue((=> @_pushTask.apply(@, arguments)), conf.concurrency)]
-            for task in queuedTasks
-                @queue.push task
+            @taskQueue = async.queue((=> @_pushTask.apply(@, arguments)), conf.concurrency)
+            for task in @queue
+                @taskQueue.push task
         # Queue into an array waiting for C2DM login to complete
         @queue = []
+        @taskQueue = null
 
     push: (subscriber, subOptions, payload) ->
-        @queue.push
+        task:
             subscriber: subscriber,
             subOptions: subOptions,
             payload: payload
+        @queue.push task
+        if @taskQueue?
+            @taskQueue.push task
 
     _pushTask: (task, done) ->
         task.subscriber.get (info) =>
@@ -37,6 +41,9 @@ class PushServiceC2DM
                     note['data.message'] = message
             note["data.#{key}"] = value for key, value of task.payload.data
             @driver.send note, (err, msgid) =>
+                i = @queue.indedOf(task)
+                if i >= 0
+                    @queue.splice(i, 1)
                 done()
                 if err
                     @failCallback()
@@ -46,5 +53,8 @@ class PushServiceC2DM
                         task.subscriber.delete()
                     else
                         @logger?.error("C2DM Error #{err} for subscriber #{task.subscriber.id}")
+
+    allMessagesPushed: ->
+        return @queue.length is 0
 
 exports.PushServiceC2DM = PushServiceC2DM

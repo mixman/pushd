@@ -12,4 +12,7 @@ class PushServices
             if info then @services[info.proto]?.push(subscriber, subOptions, payload)
             cb() if cb
 
+    servicesWithQueuedMessages: ->
+        return (proto for proto, service of @services when not service.allMessagesPushed())
+
 exports.PushServices = PushServices

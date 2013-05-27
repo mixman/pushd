@@ -34,4 +34,7 @@ class PushServiceHTTP
             req.write(JSON.stringify(body))
             req.end()
 
+    allMessagesPushed: ->
+        return true
+
 exports.PushServiceHTTP = PushServiceHTTP

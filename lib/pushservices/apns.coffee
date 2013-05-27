@@ -44,4 +44,16 @@ class PushServiceAPNS
             # On iOS we have to maintain the badge counter on the server
             subscriber.incr 'badge'
 
+    allMessagesPushed: ->
+        # queued, not yet sent to apns
+        if @driver.notificationBuffer.length > 0
+            return false
+
+        # sent but no confirmation from apns server yet
+        cachedInSockets = (sock.cachedNotifications.length for sock in @driver.sockets)
+        if (cachedInSockets.some (x) -> x.length > 0)
+            return false
+
+        return true
+
 exports.PushServiceAPNS = PushServiceAPNS

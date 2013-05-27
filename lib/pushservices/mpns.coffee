@@ -8,10 +8,12 @@ class PushServiceMPNS
 
     constructor: (@conf, @logger, tokenResolver, @failCallback) ->
         @conf.type ?= "toast"
+        @waitingCounter = 0
         if @conf.type is "tile" and not @conf.tileMapping
             throw new Error("Invalid MPNS configuration: missing `tileMapping` for `tile` type")
 
     push: (subscriber, subOptions, payload) ->
+        @waitingCounter += 1
         subscriber.get (info) =>
             note = {}
             if subOptions?.ignore_message isnt true
@@ -25,6 +27,7 @@ class PushServiceMPNS
                                 note.param = payload.compileTemplate(@conf.paramTemplate)
                             catch e
                                 @logger.error("Cannot compile MPNS param template: #{e}")
+                                @waitingCounter -= 1
                                 return
 
                     when "tile" # live tile under WP 7.5 or flip tile under WP 8.0+
@@ -60,6 +63,10 @@ class PushServiceMPNS
                             @logger?.error("MPNS Error: (#{error.statusCode}) #{error.innerError}")
                     else
                         @logger?.verbose("MPNS result: #{JSON.stringify result}")
+                    @waitingCounter -= 1
+
+    allMessagesPushed: ->
+        return @waitingCounter is 0
 
 exports.PushServiceMPNS = PushServiceMPNS
 

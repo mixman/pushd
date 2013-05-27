@@ -22,9 +22,7 @@ if settings.server?.redis_auth?
 
 
 
-# Global express configuration
-
-app = express()
+# Helpers used by customized middlewares
 
 checkUserAndPassword = (username, password) =>
     if settings.server?.auth?
@@ -37,11 +35,27 @@ checkUserAndPassword = (username, password) =>
         return passwordOK
     return false
 
+shuttingdown = false
+rejectIfShutdownInProgress = (req, res, next) =>
+    if shuttingdown
+        logger.verbose 'Server is shutting down, rejecting connection'
+        res.header 'Retry-After', 120
+        res.send 503
+    else
+        next()
+
+
+
+# Global express configuration
+
+app = express()
+
 app.configure ->
     app.use(express.logger(':method :url :status')) if settings.server?.access_log
     app.use(express.limit('1mb')) # limit posted data to 1MB
     if settings.server?.auth? and not settings.server?.acl?
         app.use(express.basicAuth checkUserAndPassword)
+    app.use(rejectIfShutdownInProgress)
     app.use(express.bodyParser())
     app.use(app.router)
     app.disable('x-powered-by');
@@ -142,11 +156,13 @@ if eventSourceEnabled
     require('./lib/eventsource').setup(app, authorize, eventPublisher)
 
 port = settings?.server?.tcp_port ? 80
-app.listen port
+httpserver = app.listen port
 logger.info "Listening on tcp port #{port}"
 
 
+
 # UDP Event API
+
 udpApi = dgram.createSocket("udp4")
 
 event_route = /^\/event\/([a-zA-Z0-9:._-]{1,100})$/
@@ -180,3 +196,45 @@ port = settings?.server?.udp_port
 if port?
     udpApi.bind port
     logger.info "Listening on udp port #{port}"
+
+
+
+# Support for trying to shut down gracefully by rejecting incoming messages
+
+closeServersAndExit = (status) ->
+    httpserver.close()
+    redis.quit()
+    process.exit(status)
+
+gracefulShutdown = ->
+    logger.info 'Graceful shutdown initiated, rejecting new connections'
+    shuttingdown = true
+    waiting = pushServices.servicesWithQueuedMessages()
+    if waiting.length > 0
+        logger.info 'Waiting for following services to send queued messages:'
+        logger.info waiting.join(', ')
+
+        finalize = ->
+            waiting = pushServices.servicesWithQueuedMessages()
+            if waiting.length > 0
+                logger.error 'Unclean exit!'
+                logger.error 'Messages still queued after a timeout on following services:'
+                logger.error waiting.join(', ')
+                closeServersAndExit(1)
+            else
+                closeServersAndExit(0)
+        setTimeout finalize, 5000
+    else
+        logger.info 'No queued messages, exiting...'
+        closeServersAndExit(0)
+
+process.on 'SIGTERM', ->
+    gracefulShutdown()
+
+process.on 'SIGINT', ->
+    gracefulShutdown()
+
+process.on 'uncaughtException', (err) ->
+    logger.error 'Uncaught exception, attempting graceful shutdown'
+    logger.error err.stack
+    gracefulShutdown()
